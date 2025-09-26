@@ -1,16 +1,38 @@
-# Launches SkyRL training on the Verifiers environment.
+#!/usr/bin/env bash
+# Launches SkyRL training on Verifiers environments (single or multiple).
 #
-# Example:
+# Examples:
+#   # Single env
 #   bash integrations/verifiers/run_verifiers.sh
 #
+#   # Multi env (datasets already prepared into $DATA_DIR)
+#   ENV_IDS="will/wordle,verifiers/gsm8k" DATA_DIR="$HOME/data/verifiers_mix" \
+#     bash integrations/verifiers/run_verifiers.sh
+
 set -x
 
-# Specify environment ID from Environments Hub in form "org/name@version" (e.g., will/wordle@0.1.4)
-ENV_ID="will/wordle"
-DATA_DIR="$HOME/data/$ENV_ID"
-NUM_GPUS=1
-LOGGER="wandb"  # change to "console" to print to stdout
+# Config (can be overridden via environment)
+ENV_ID=${ENV_ID:-"will/wordle"}   # Single environment ID (org/name@version)
+ENV_IDS=${ENV_IDS:-""}            # Comma-separated list for multi-env
+DATA_DIR=${DATA_DIR:-""}          # Directory with train.parquet/validation.parquet
+NUM_GPUS=${NUM_GPUS:-1}
+LOGGER=${LOGGER:-"wandb"}         # change to "console" to print to stdout
 
+# Determine dataset directory and label
+if [[ -n "$ENV_IDS" ]]; then
+  # Multi-env mode: DATA_DIR must point to the combined dataset
+  if [[ -z "$DATA_DIR" ]]; then
+    FIRST_ENV="${ENV_IDS%%,*}"
+    DATA_DIR="$HOME/data/${FIRST_ENV##*/}_multi"
+  fi
+  ENV_LABEL="verifiers_multi"
+else
+  # Single-env mode
+  DATA_DIR="${DATA_DIR:-$HOME/data/$ENV_ID}"
+  ENV_LABEL="$ENV_ID"
+fi
+
+# Launch training
 uv run --isolated --with verifiers --extra vllm -m integrations.verifiers.entrypoints.main_verifiers \
   data.train_data="['$DATA_DIR/train.parquet']" \
   data.val_data="['$DATA_DIR/validation.parquet']" \
@@ -34,9 +56,9 @@ uv run --isolated --with verifiers --extra vllm -m integrations.verifiers.entryp
   generator.enable_http_endpoint=true \
   generator.gpu_memory_utilization=0.8 \
   trainer.logger="$LOGGER" \
-  environment.env_class="$ENV_ID" \
+  environment.env_class="$ENV_LABEL" \
   trainer.project_name="verifiers" \
   trainer.run_name="verifiers_test" \
   trainer.ckpt_interval=-1 \
-  trainer.ckpt_path="$HOME/ckpts/verifiers_ckpt"
-  $@
+  trainer.ckpt_path="$HOME/ckpts/verifiers_ckpt" \
+  "$@"
